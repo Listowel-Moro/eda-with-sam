@@ -1,0 +1,147 @@
+# AWSTemplateFormatVersion: '2010-09-09'
+# Transform: AWS::Serverless-2016-10-31
+# Description: >
+#   sam-eda
+
+#   Sample SAM Template for sam-eda
+
+# # More info about Globals: https://github.com/awslabs/serverless-application-model/blob/master/docs/globals.rst
+# Globals:
+#   Function:
+#     Timeout: 20
+#     MemorySize: 512
+
+#     # You can add LoggingConfig parameters such as the Logformat, Log Group, and SystemLogLevel or ApplicationLogLevel. Learn more here https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/sam-resource-function.html#sam-function-loggingconfig.
+#     LoggingConfig:
+#       LogFormat: JSON
+# Resources:
+#   HelloWorldFunction:
+#     Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+#     Properties:
+#       CodeUri: HelloWorldFunction
+#       Handler: helloworld.App::handleRequest
+#       Runtime: java21
+#       Architectures:
+#       - x86_64
+#       MemorySize: 512
+#       Environment: # More info about Env Vars: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#environment-object
+#         Variables:
+#           PARAM1: VALUE
+#       Events:
+#         HelloWorld:
+#           Type: Api # More info about API Event Source: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#api
+#           Properties:
+#             Path: /hello
+#             Method: get
+
+# Outputs:
+#   # ServerlessRestApi is an implicit API created out of Events key under Serverless::Function
+#   # Find out more about other implicit resources you can reference within SAM
+#   # https://github.com/awslabs/serverless-application-model/blob/master/docs/internals/generated_resources.rst#api
+#   HelloWorldApi:
+#     Description: API Gateway endpoint URL for Prod stage for Hello World function
+#     Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/hello/"
+#   HelloWorldFunction:
+#     Description: Hello World Lambda Function ARN
+#     Value: !GetAtt HelloWorldFunction.Arn
+#   HelloWorldFunctionIamRole:
+#     Description: Implicit IAM Role created for Hello World function
+#     Value: !GetAtt HelloWorldFunctionRole.Arn
+
+
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: S3 Event-Driven Architecture with Lambda & SNS
+
+# Parameters to support different environments
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues:
+      - dev
+      - prod
+    Description: Deployment environment (dev or prod)
+    
+  EmailAddress:
+    Type: String
+    Default: listowel.moro@amalitech.com
+    Description: Email address to receive notifications
+
+# Resources for our application
+Resources:
+  # Lambda function to process uploads
+  HelloWorldFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub file-upload-s3-${Environment}
+      CodeUri: HelloWorldFunction/
+      Handler: helloworld.App::handleRequest
+      Runtime: java21
+      MemorySize: 512
+      Timeout: 30
+      Environment:
+        Variables:
+          SNS_TOPIC_ARN: !Ref NotificationTopic
+          ENVIRONMENT: !Ref Environment
+      Policies:
+        - SNSPublishMessagePolicy:
+            TopicName: !GetAtt NotificationTopic.TopicName
+        - S3ReadPolicy:
+            BucketName: !Sub listo-s3-upload-bucket-${Environment}
+
+  # SNS Topic for notifications
+  NotificationTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub file-upload-notifications-${Environment}
+      DisplayName: !Sub "File Upload Notifications - ${Environment}"
+
+  # SNS Subscription for email
+  EmailNotificationSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      Protocol: email
+      Endpoint: !Ref EmailAddress
+      TopicArn: !Ref NotificationTopic
+
+  # Lambda permission to allow S3 to invoke it
+  FileUploadPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref HelloWorldFunction
+      Principal: s3.amazonaws.com
+      SourceArn: !Sub arn:aws:s3:::listo-s3-upload-bucket-${Environment}
+      SourceAccount: !Ref AWS::AccountId
+
+  # S3 Bucket for file uploads
+  UploadBucket:
+    Type: AWS::S3::Bucket
+    DependsOn: FileUploadPermission
+    Properties:
+      BucketName: !Sub listo-s3-upload-bucket-${Environment}
+      NotificationConfiguration:
+        LambdaConfigurations:
+          - Event: s3:ObjectCreated:*
+            Function: !GetAtt HelloWorldFunction.Arn
+            # Filter could be added here if needed
+            # Filter:
+            #   S3Key:
+            #     Rules:
+            #       - Name: suffix
+            #         Value: .jpg
+
+# Outputs for easy reference
+Outputs:
+  UploadBucketName:
+    Description: Name of the S3 bucket for file uploads
+    Value: !Ref UploadBucket
+    
+  NotificationTopicArn:
+    Description: ARN of the SNS topic for notifications
+    Value: !Ref NotificationTopic
+    
+  LambdaFunctionName:
+    Description: Name of the Lambda function processing uploads
+    Value: !Ref HelloWorldFunction
