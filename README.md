@@ -54,7 +54,7 @@ You can find your API Gateway Endpoint URL in the output values displayed after 
 
 ## Use the SAM CLI to build and test locally
 
-Build your application with the `sam build` command.
+Build your application with the `sam build` command. 
 
 ```bash
 sam-eda$ sam build
